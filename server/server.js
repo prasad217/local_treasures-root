@@ -20,7 +20,7 @@ app.use(express.json());
 
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
-    cb(null, 'uploads/');
+    cb(null, '/Users/prasad/Desktop/react-version1 copy/server/uploads/');
   },
   filename: function (req, file, cb) {
     cb(null, Date.now() + '-' + file.originalname);
@@ -36,7 +36,7 @@ const dbOptions = {
   database: process.env.DB_NAME || 'happy'
 };
 
-const db = mysql.createPool(dbOptions);
+const pool = mysql.createPool(dbOptions);
 
 // Create session middleware with default session store
 app.use(session({
@@ -50,28 +50,32 @@ app.use(session({
   }
 }));
 
-
 app.set('trust proxy', 1);
-
 
 app.post('/signin', async (req, res) => {
   const { email, password } = req.body;
   try {
-    const [rows] = await db.query('SELECT id, password FROM users WHERE email = ?', [email]);
+    const [rows] = await pool.query('SELECT id, password FROM users WHERE email = ?', [email]);
+
     if (rows.length === 0) {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
     const user = rows[0];
     if (await bcrypt.compare(password, user.password)) {
-      // Ensure correct setting of the cookie
-      res.cookie('userId', user.id.toString(), { 
-        httpOnly: true, 
-        sameSite: 'strict',
-        path: '/', // Ensure the cookie is set for the entire domain
-        secure: false, // Set to true if using HTTPS
-        maxAge: 86400 * 1000 // Optional: Set cookie expiration
+      // Regenerate session when signing in for security
+      req.session.regenerate((err) => {
+        if (err) {
+          console.error('Session regeneration error:', err);
+          return res.status(500).json({ error: 'Session error' });
+        }
+        // Store userId in session
+        req.session.userId = user.id;
+        // Set secure options for session cookie
+        req.session.cookie.secure = true; // for HTTPS
+        req.session.cookie.httpOnly = true;
+        req.session.cookie.maxAge = 24 * 60 * 60 * 1000; // 24 hours
+        res.json({ message: 'Sign-in successful' });
       });
-      res.json({ message: 'Sign-in successful' });
     } else {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
@@ -81,12 +85,11 @@ app.post('/signin', async (req, res) => {
   }
 });
 
-
 app.post('/register', async (req, res) => {
   const { username, email, password } = req.body;
   try {
     const hashedPassword = await bcrypt.hash(password, 10);
-    await db.execute('INSERT INTO users (username, email, password) VALUES (?, ?, ?)', [username, email, hashedPassword]);
+    await pool.execute('INSERT INTO users (username, email, password) VALUES (?, ?, ?)', [username, email, hashedPassword]);
     res.status(201).json({ message: 'User registered successfully' });
   } catch (error) {
     console.error('Error registering user:', error);
@@ -98,7 +101,7 @@ app.post('/dealer/register', async (req, res) => {
   const { name, phone, email, password, age, address, locationLink, shopName } = req.body;
   try {
     const hashedPassword = await bcrypt.hash(password, 10);
-    await db.execute(
+    await pool.execute(
       'INSERT INTO dealers (name, phone, email, age, address, password, location_link, shop_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
       [name, phone, email, age, address, hashedPassword, locationLink, shopName]
     );
@@ -112,20 +115,16 @@ app.post('/dealer/register', async (req, res) => {
 app.post('/dealer/signin', async (req, res) => {
   const { email, password } = req.body;
   try {
-    const [rows] = await db.query('SELECT id, password FROM dealers WHERE email = ?', [email]);
+    const [rows] = await pool.query('SELECT id, password FROM dealers WHERE email = ?', [email]);
+
     if (rows.length === 0) {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
     const dealer = rows[0];
     if (await bcrypt.compare(password, dealer.password)) {
-      // Ensure correct setting of the cookie
-      res.cookie('dealerId', dealer.id.toString(), { 
-        httpOnly: true, 
-        sameSite: 'strict',
-        path: '/', // Ensure the cookie is set for the entire domain
-        secure: false, // Set to true if using HTTPS
-        maxAge: 86400 * 1000 // Optional: Set cookie expiration
-      });
+      // Authenticate and set dealerId in session rather than a cookie
+      req.session.dealerId = dealer.id; // Securely set dealerId in the session
+
       res.json({ message: 'Sign-in successful' });
     } else {
       return res.status(401).json({ error: 'Invalid credentials' });
@@ -135,6 +134,7 @@ app.post('/dealer/signin', async (req, res) => {
     res.status(500).json({ error: 'Server error' });
   }
 });
+
 
 app.post('/logout', (req, res) => {
   res.clearCookie('userId');
@@ -146,33 +146,73 @@ app.post('/logout', (req, res) => {
     res.send({ message: 'Logout successful' });
   });
 });
-app.post('/dealer/addProduct', upload.single('image'), async (req, res) => {
-  const { name, price, description } = req.body;
-  
-  // Check if req.file exists and contains the file
-  const image = req.file ? req.file.path : null;
 
-  const dealerId = req.session.dealerId; // Or retrieve dealer ID through another method if session is not used
-
-  if (!dealerId) {
+app.get('/dealer/info', async (req, res) => {
+  if (!req.session.dealerId) {
     return res.status(401).json({ message: 'Unauthorized. Please log in.' });
   }
 
   try {
-    await db.execute(
-      'INSERT INTO products (name, price, description, image, dealer_id) VALUES (?, ?, ?, ?, ?)',
-      [name, price, description, image, dealerId]
-    );
-    res.status(201).json({ message: 'Product added successfully' });
+    // Example of fetching dealer details from the database
+    const [rows] = await pool.query('SELECT id, name, email FROM dealers WHERE id = ?', [req.session.dealerId]);
+    if (rows.length > 0) {
+      res.json(rows[0]); // Send back the dealer's information
+    } else {
+      res.status(404).json({ message: 'Dealer not found' });
+    }
   } catch (error) {
-    console.error('Error adding product:', error);
+    console.error('Error fetching dealer info:', error);
     res.status(500).json({ error: 'Server error' });
   }
 });
 
+app.post('/dealer/addProduct', upload.single('image'), async (req, res) => {
+  console.log('Form data:', req.body);
+  console.log('File:', req.file);
+
+  let { name, description, actualCost, discountPrice, instockqty, category, imageType, imageUrlInput } = req.body;
+  
+  actualCost = parseFloat(actualCost);
+  discountPrice = parseFloat(discountPrice);
+  instockqty = parseInt(instockqty, 10);
+
+  description = description || ''; // Fallback for description
+  const dealerId = req.session.dealerId; // Assume this is where you store logged in dealer's ID
+
+  // Decide on image_url based on whether an image was uploaded or a URL was provided
+  let imageUrl = '';
+  if (imageType === 'upload' && req.file) {
+    imageUrl = req.file.path; // Path where the uploaded image is saved
+  } else if (imageType === 'url') {
+    imageUrl = imageUrlInput; // Directly use the URL provided by the user
+  }
+
+  // Validate required fields
+  if (!dealerId || !name || isNaN(actualCost) || isNaN(discountPrice) || isNaN(instockqty) || !category) {
+    console.error('Missing or invalid fields', {
+      dealerId, name, actualCost, discountPrice, instockqty, category
+    });
+    return res.status(400).json({ error: 'Missing or invalid required fields' });
+  }
+
+  try {
+    const query = `
+      INSERT INTO products (dealer_id, name, image_url, description, actual_cost, discount_price, instockqty, category)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`;
+    const params = [dealerId, name, imageUrl, description, actualCost, discountPrice, instockqty, category];
+    await pool.execute(query, params);
+
+    res.status(201).json({ message: 'Product added successfully' });
+  } catch (error) {
+    console.error('Error adding product:', error);
+    res.status(500).json({ error: 'Server error', details: error.message });
+  }
+});
+
+
 app.get('/api/products', async (req, res) => {
   try {
-    const [rows] = await db.query('SELECT * FROM products');
+    const [rows] = await pool.query('SELECT * FROM products');
     res.json(rows);
   } catch (error) {
     console.error('Error fetching products:', error);
@@ -181,25 +221,19 @@ app.get('/api/products', async (req, res) => {
 });
 app.post('/api/cart', async (req, res) => {
   const { productId } = req.body;
-  const userId = req.cookies.userId; // Assuming you're using cookie-parser middleware
+  const userId = req.session.userId; // Retrieve userId from session
 
-  // Check if userId cookie exists
+  // Check if user is signed in
   if (!userId) {
-    // Redirect to sign-in page if user is not signed in
-    return res
-      .status(401)
-      .json({
-        error:
-          "User is not signed in. Please sign in to add products to the cart.",
-      });
+    return res.status(401).json({
+      error: "User is not signed in. Please sign in to add products to the cart.",
+    });
   }
 
   try {
-    // Retrieve product details from the products table
-    const [rows] = await db.query(
-      "SELECT name, discount_price, image_url FROM products WHERE id = ?",
-      [productId]
-    );
+    // Retrieve product details from the database
+    const [rows] = await pool.query('SELECT id, password FROM users WHERE email = ?', [email]);
+
 
     if (rows.length === 0) {
       return res.status(404).json({ error: "Product not found" });
@@ -207,7 +241,7 @@ app.post('/api/cart', async (req, res) => {
 
     const { name, discount_price, image_url } = rows[0];
 
-    // Perform database insert to add the product to the cart with user ID
+    // Add the product to the cart in the database
     await db.execute(
       "INSERT INTO cart_items (user_id, product_id, name, price, image_url) VALUES (?, ?, ?, ?, ?)",
       [userId, productId, name, discount_price, image_url]
@@ -221,6 +255,7 @@ app.post('/api/cart', async (req, res) => {
   }
 });
 
+
 // Route to fetch cart items
 app.get('/api/cart', async (req, res) => {
   const userId = req.cookies.userId; // Assuming you're using cookie-parser middleware
@@ -233,7 +268,7 @@ app.get('/api/cart', async (req, res) => {
 
   try {
     // Retrieve cart items for the logged-in user from the database
-    const [rows] = await db.query(
+    const [rows] = await pool.query(
       "SELECT * FROM cart_items WHERE user_id = ?",
       [userId]
     );
@@ -246,22 +281,20 @@ app.get('/api/cart', async (req, res) => {
   }
 });
 
-app.delete("/api/cart/:product_id", (req, res) => {
+app.delete("/api/cart/:product_id", async (req, res) => {
   const productId = req.params.product_id;
 
-  // Perform a database query to delete the cart item by ID
-  pool.query(
-    "DELETE FROM cart_items WHERE product_id = ?",
-    [productId],
-    (error, results) => {
-      if (error) {
-        console.error("Error deleting cart item:", error);
-        res.status(500).json({ error: "Internal Server Error" });
-      } else {
-        res.status(200).json({ message: "Cart item deleted successfully" });
-      }
-    }
-  );
+  try {
+    // Perform a database query to delete the cart item by ID
+    await pool.execute(
+      "DELETE FROM cart_items WHERE product_id = ?",
+      [productId]
+    );
+    res.status(200).json({ message: "Cart item deleted successfully" });
+  } catch (error) {
+    console.error("Error deleting cart item:", error);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
 });
 
 // Route to update the quantity of a cart item by its ID
@@ -271,7 +304,7 @@ app.patch("/api/cart/items/:product_id", async (req, res) => {
 
   try {
     // Perform a database query to update the quantity of the cart item by ID
-    await db.execute("UPDATE cart_items SET quantity = ? WHERE product_id = ?", [change, productId]);
+    await pool.execute("UPDATE cart_items SET quantity = ? WHERE product_id = ?", [change, productId]);
     res.status(200).json({ message: "Quantity updated successfully" });
   } catch (error) {
     console.error("Error updating cart item quantity:", error);
@@ -285,7 +318,7 @@ app.patch("/api/cart/items/:product_id", async (req, res) => {
 app.get('/api/items', async (req, res) => {
   try {
     // Query the database to retrieve all items
-    const [rows] = await db.query('SELECT * FROM items');
+    const [rows] = await pool.query('SELECT * FROM items');
     res.json(rows); // Send the retrieved items as a JSON response
   } catch (error) {
     console.error('Error fetching items:', error);
@@ -298,7 +331,7 @@ app.get('/api/products/category/:categoryName', async (req, res) => {
   const { categoryName } = req.params;
   try {
     const query = 'SELECT * FROM products WHERE category = ?';
-    const [products] = await db.query(query, [categoryName]);
+    const [products] = await pool.query(query, [categoryName]);
     if (products.length) {
       res.json(products);
     } else {
@@ -314,7 +347,7 @@ app.get('/api/products/:productId', async (req, res) => {
   const { productId } = req.params;
   try {
     const query = 'SELECT * FROM products WHERE id = ?';
-    const [product] = await db.query(query, [productId]);
+    const [product] = await pool.query(query, [productId]);
     if (product.length > 0) {
       res.json(product[0]);
     } else {
