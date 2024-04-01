@@ -51,31 +51,17 @@ app.use(session({
 }));
 
 app.set('trust proxy', 1);
-
 app.post('/signin', async (req, res) => {
   const { email, password } = req.body;
   try {
     const [rows] = await pool.query('SELECT id, password FROM users WHERE email = ?', [email]);
-
     if (rows.length === 0) {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
     const user = rows[0];
     if (await bcrypt.compare(password, user.password)) {
-      // Regenerate session when signing in for security
-      req.session.regenerate((err) => {
-        if (err) {
-          console.error('Session regeneration error:', err);
-          return res.status(500).json({ error: 'Session error' });
-        }
-        // Store userId in session
-        req.session.userId = user.id;
-        // Set secure options for session cookie
-        req.session.cookie.secure = true; // for HTTPS
-        req.session.cookie.httpOnly = true;
-        req.session.cookie.maxAge = 24 * 60 * 60 * 1000; // 24 hours
-        res.json({ message: 'Sign-in successful' });
-      });
+      req.session.userId = user.id;
+      res.json({ userId: user.id, message: 'User sign-in successful' });
     } else {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
@@ -219,6 +205,7 @@ app.get('/api/products', async (req, res) => {
     res.status(500).json({ error: 'Server error' });
   }
 });
+
 app.post('/api/cart', async (req, res) => {
   const { productId } = req.body;
   const userId = req.session.userId; // Retrieve userId from session
@@ -232,17 +219,16 @@ app.post('/api/cart', async (req, res) => {
 
   try {
     // Retrieve product details from the database
-    const [rows] = await pool.query('SELECT id, password FROM users WHERE email = ?', [email]);
+    const [productRows] = await pool.query('SELECT * FROM products WHERE id = ?', [productId]);
 
-
-    if (rows.length === 0) {
+    if (productRows.length === 0) {
       return res.status(404).json({ error: "Product not found" });
     }
 
-    const { name, discount_price, image_url } = rows[0];
+    const { name, discount_price, image_url } = productRows[0];
 
     // Add the product to the cart in the database
-    await db.execute(
+    await pool.execute(
       "INSERT INTO cart_items (user_id, product_id, name, price, image_url) VALUES (?, ?, ?, ?, ?)",
       [userId, productId, name, discount_price, image_url]
     );
@@ -251,45 +237,56 @@ app.post('/api/cart', async (req, res) => {
     res.json({ message: "Product added to cart successfully" });
   } catch (error) {
     console.error("Error adding product to cart:", error);
-    res.status(500).json({ error: "Failed to add product to cart" });
+    res.status(500).json({ error: "Failed to add product to cart", detail: error.message });
   }
 });
+
 
 
 // Route to fetch cart items
 app.get('/api/cart', async (req, res) => {
-  const userId = req.cookies.userId; // Assuming you're using cookie-parser middleware
+  const userId = req.session.userId; // Retrieve userId from session
 
-  // Check if userId cookie exists
-  if (!userId) {
-    // If user is not signed in, return an error response
-    return res.status(401).json({ error: "User is not signed in" });
-  }
+  console.log("Session Info:", req.session); // Debugging: Log session info
 
-  try {
-    // Retrieve cart items for the logged-in user from the database
-    const [rows] = await pool.query(
-      "SELECT * FROM cart_items WHERE user_id = ?",
-      [userId]
-    );
+ // Check if userId exists in the session
+ if (!userId) {
+   console.error("User ID not found in session"); // Log for debugging
+   return res.status(401).json({ error: "User is not signed in" });
+ }
 
-    // Send the retrieved cart items as a JSON response
-    res.json(rows);
-  } catch (error) {
-    console.error("Error fetching cart items:", error);
-    res.status(500).json({ error: "Failed to fetch cart items" });
-  }
+ try {
+   // Retrieve cart items for the logged-in user from the database
+   const [rows] = await pool.query(
+     "SELECT * FROM cart_items WHERE user_id = ?",
+     [userId]
+   );
+
+   console.log("Cart Items Fetched:", rows); // Debugging: Log fetched cart items
+
+   // Send the retrieved cart items as a JSON response
+   res.json(rows);
+ } catch (error) {
+   console.error("Error fetching cart items:", error);
+   res.status(500).json({ error: "Failed to fetch cart items" });
+ }
 });
 
-app.delete("/api/cart/:product_id", async (req, res) => {
-  const productId = req.params.product_id;
+app.delete("/api/cart/:id", async (req, res) => {
+  const productId = req.params.id;
+  console.log(`Attempting to delete product with ID: ${productId}`); // Debugging log
 
   try {
-    // Perform a database query to delete the cart item by ID
-    await pool.execute(
-      "DELETE FROM cart_items WHERE product_id = ?",
+    const [result] = await pool.execute(
+      "DELETE FROM cart_items WHERE id = ?",
       [productId]
     );
+    console.log("Deletion result:", result); // Log result to debug
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ message: "Cart item not found or already deleted" });
+    }
+
     res.status(200).json({ message: "Cart item deleted successfully" });
   } catch (error) {
     console.error("Error deleting cart item:", error);
@@ -298,17 +295,30 @@ app.delete("/api/cart/:product_id", async (req, res) => {
 });
 
 // Route to update the quantity of a cart item by its ID
-app.patch("/api/cart/items/:product_id", async (req, res) => {
-  const productId = req.params.product_id;
-  const { change } = req.body;
+app.patch("/api/cart/items/:id", async (req, res) => {
+  const productId = req.params.id;
+  const { quantity } = req.body; // Make sure you're expecting the right property
+
+  if (!quantity) {
+    return res.status(400).json({ error: "Quantity not provided" });
+  }
+
+  console.log(`Updating quantity for product ID ${productId} to ${quantity}`);
 
   try {
-    // Perform a database query to update the quantity of the cart item by ID
-    await pool.execute("UPDATE cart_items SET quantity = ? WHERE product_id = ?", [change, productId]);
-    res.status(200).json({ message: "Quantity updated successfully" });
+    const [result] = await pool.execute(
+      "UPDATE cart_items SET quantity = ? WHERE id = ?",
+      [quantity, productId]
+    );
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ message: "Cart item not found" });
+    }
+
+    res.json({ message: "Quantity updated successfully" });
   } catch (error) {
     console.error("Error updating cart item quantity:", error);
-    res.status(500).json({ error: "Failed to update cart item quantity", detail: error.message });
+    res.status(500).json({ error: "Failed to update cart item quantity" });
   }
 });
 
