@@ -222,7 +222,59 @@ app.get('/api/user/info', async (req, res) => {
   }
 });
 
+app.post('/api/address', async (req, res) => {
+  const userId = req.session.userId; // Retrieve the logged-in user's ID from the session
 
+  // Check if the user is logged in
+  if (!userId) {
+    return res.status(401).json({ message: 'Unauthorized. Please log in.' });
+  }
+
+  // Extract address data from request body
+  const { name, door_no, address_lane, landmark, pincode, city, state, phonenumber } = req.body;
+
+  try {
+    // Insert or update the address in the user_addresses table
+    // Assuming there can be only one address per user, update if exists else insert
+    const query = `
+      INSERT INTO user_addresses (user_id, name, door_no, address_lane, landmark, pincode, city, state, phonenumber)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON DUPLICATE KEY UPDATE name=VALUES(name), door_no=VALUES(door_no), address_lane=VALUES(address_lane), 
+                              landmark=VALUES(landmark), pincode=VALUES(pincode), city=VALUES(city), 
+                              state=VALUES(state), phonenumber=VALUES(phonenumber)`;
+
+    await pool.execute(query, [userId, name, door_no, address_lane, landmark, pincode, city, state, phonenumber]);
+
+    // After saving, retrieve and return the latest address of the user
+    const [rows] = await pool.query('SELECT * FROM user_addresses WHERE user_id = ?', [userId]);
+    
+    if (rows.length > 0) {
+      res.json(rows[0]); // Send back the user's address information
+    } else {
+      res.status(404).json({ message: 'Address not found after saving.' });
+    }
+  } catch (error) {
+    console.error('Error saving or fetching user address:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Assuming this is a part of your Express app setup
+
+app.get('/api/users/addresses', async (req, res) => {
+  const userId = req.session.userId;
+  if (!userId) {
+      return res.status(401).json({ message: 'Unauthorized. Please log in.' });
+  }
+
+  try {
+      const [addresses] = await pool.query('SELECT * FROM user_addresses WHERE user_id = ?', [userId]);
+      res.json(addresses);
+  } catch (error) {
+      console.error('Error fetching addresses:', error);
+      res.status(500).json({ error: 'Server error' });
+  }
+});
 
 
 
@@ -342,24 +394,55 @@ app.post('/dealer/addProduct', upload.single('image'), async (req, res) => {
 
 // Add this route to fetch products by dealer ID
 app.get('/dealer/products/:dealerId', async (req, res) => {
-  const dealerId = req.params.dealerId;
+    const dealerId = req.session.dealerId; // Retrieve userId from session
+  
+    console.log("Session Info:", req.session); // Debugging: Log session info
+  
+   // Check if userId exists in the session
+   if (!dealerId) {
+     console.error("dealer ID not found in session"); // Log for debugging
+     return res.status(401).json({ error: "dealer is not signed in" });
+   }
+  
+   try {
+     // Retrieve cart items for the logged-in user from the database
+     const [rows] = await pool.query(
+       "SELECT * FROM products WHERE dealer_id = ?",
+       [dealerId]
+     );
+  
+     console.log("Cart Items Fetched:", rows); // Debugging: Log fetched cart items
+  
+     // Send the retrieved cart items as a JSON response
+     res.json(rows);
+   } catch (error) {
+     console.error("Error fetching cart items:", error);
+     res.status(500).json({ error: "Failed to fetch cart items" });
+   }
+  });
+
+
+app.delete("/api/dealer/products/:productId", async (req, res) => {
+  const productId = req.params.productId;
+  console.log(`Attempting to delete product with ID: ${productId}`); // Debugging log
 
   try {
-    // Query the database to retrieve products belonging to the specified dealer
-    const [products] = await pool.query('SELECT * FROM products WHERE dealer_id = ?', [dealerId]);
+    const [result] = await pool.execute(
+      "DELETE FROM products WHERE id = ?",
+      [productId]
+    );
+    console.log("Deletion result:", result); // Log result to debug
 
-    // Check if products were found
-    if (products.length > 0) {
-      res.json(products); // Send the retrieved products as a JSON response
-    } else {
-      res.status(404).send('No products found for this dealer');
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ message: "product not found or already deleted" });
     }
+
+    res.status(200).json({ message: "product deleted successfully" });
   } catch (error) {
-    console.error('Error fetching products by dealer ID:', error);
-    res.status(500).send('Server error');
+    console.error("Error deleting product:", error);
+    res.status(500).json({ error: "Internal Server Error" });
   }
 });
-
 
 //products backend
 
