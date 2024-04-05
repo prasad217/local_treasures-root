@@ -6,6 +6,8 @@ const bcrypt = require('bcrypt');
 const cors = require('cors');
 const multer = require('multer');
 const cookieParser = require('cookie-parser');
+const nodemailer = require('nodemailer');
+
 
 const app = express();
 const port = 3001;
@@ -49,6 +51,16 @@ app.use(session({
     sameSite: 'lax'
   }
 }));
+
+
+
+const transporter = nodemailer.createTransport({
+  service: 'gmail',
+  auth: {
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASS
+  }
+});
 
 app.set('trust proxy', 1);
 
@@ -443,6 +455,86 @@ app.delete("/api/dealer/products/:productId", async (req, res) => {
     res.status(500).json({ error: "Internal Server Error" });
   }
 });
+
+app.post('/api/orders', async (req, res) => {
+  const { addressId, items, totalPrice } = req.body;
+  const userId = req.session.userId;
+
+  if (!userId) {
+    return res.status(401).json({ message: "User not signed in." });
+  }
+
+  // Example: Save the order in the database
+  // This is simplified and might involve multiple queries depending on your schema
+  const [orderResult] = await pool.query('INSERT INTO orders (user_id, address_id, total_price) VALUES (?, ?, ?)', [userId, addressId, totalPrice]);
+  const orderId = orderResult.insertId;
+
+  for (const item of items) {
+    // Check if the product exists in the database
+    const [productRows] = await pool.query('SELECT * FROM products WHERE id = ?', [item.productId]);
+  
+    if (productRows.length > 0) {
+      const product = productRows[0];
+      const dealerId = product.dealer_id;
+  
+      // Check if the dealer ID is defined
+      if (dealerId) {
+        const [dealerRows] = await pool.query('SELECT email FROM dealers WHERE id = ?', [dealerId]);
+  
+        if (dealerRows.length > 0) {
+          const dealerEmail = dealerRows[0].email;
+          // Send email to the dealer if email is present
+          await sendEmailToDealer(dealerEmail, item);
+        } else {
+          console.error(`Dealer with ID ${dealerId} not found.`);
+        }
+  
+        // Save order details with the correct product_id
+        await pool.query('INSERT INTO order_items (order_id, product_id, quantity) VALUES (?, ?, ?)', [orderId, item.productId, item.quantity]);
+      } else {
+        console.error(`Dealer ID not found for product with ID ${item.productId}.`);
+      }
+    } else {
+      console.error(`Product with ID ${item.productId} not found.`);
+    }
+  }
+  
+  
+  res.json({ message: "Order placed successfully", orderId: orderId });
+});
+async function sendEmailToDealer(email, item) {
+  if (!email) {
+    console.error('No email recipient specified');
+    return; // Exit function if no email recipient is provided
+  }
+
+  try {
+    // Fetch product details based on product ID
+    const [productRows] = await pool.query('SELECT name, image_url FROM products WHERE id = ?', [item.productId]);
+
+    if (productRows.length > 0) {
+      const { name, image_url } = productRows[0];
+
+      const mailOptions = {
+        from: process.env.EMAIL_USER,
+        to: email,
+        subject: 'New Order Notification',
+        text: `You have a new order for the following item: ${name} (Quantity: ${item.quantity}). Please prepare it for shipment.`,
+        // Consider using HTML email for better formatting
+      };
+
+      const info = await transporter.sendMail(mailOptions);
+      console.log('Email sent: ' + info.response);
+    } else {
+      console.error(`Product with ID ${item.productId} not found.`);
+    }
+  } catch (error) {
+    console.error('Failed to send email:', error);
+  }
+}
+
+
+
 
 //products backend
 
