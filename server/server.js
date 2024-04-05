@@ -534,6 +534,29 @@ async function sendEmailToDealer(email, item) {
 }
 
 
+app.get('/dealer/orders', async (req, res) => {
+  const dealerId = req.session.dealerId;
+  if (!dealerId) {
+    return res.status(401).json({ message: 'Unauthorized. Please log in.' });
+  }
+
+  try {
+    const query = `
+      SELECT o.id AS orderId, o.total_price, oi.quantity, p.id AS productId, p.name, p.image_url
+      FROM orders o
+      INNER JOIN order_items oi ON o.id = oi.order_id
+      INNER JOIN products p ON oi.product_id = p.id
+      WHERE p.dealer_id = ?
+      ORDER BY o.id DESC
+    `;
+    const [orders] = await pool.query(query, [dealerId]);
+    res.json(orders);
+  } catch (error) {
+    console.error('Error fetching dealer orders:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 
 
 //products backend
