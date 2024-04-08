@@ -7,8 +7,10 @@ const cors = require('cors');
 const multer = require('multer');
 const cookieParser = require('cookie-parser');
 const nodemailer = require('nodemailer');
+const crypto = require('crypto');
 
 
+const saltRounds = 10; // Recommended value
 const app = express();
 const port = 3001;
 
@@ -88,7 +90,7 @@ app.post('/signin', async (req, res) => {
 app.post('/register', async (req, res) => {
   const { username, email, password } = req.body;
   try {
-    const hashedPassword = await bcrypt.hash(password, 10);
+    const hashedPassword = await bcrypt.hash(password, 12);
     await pool.execute('INSERT INTO users (username, email, password) VALUES (?, ?, ?)', [username, email, hashedPassword]);
     res.status(201).json({ message: 'User registered successfully' });
   } catch (error) {
@@ -295,7 +297,7 @@ app.get('/api/users/addresses', async (req, res) => {
 app.post('/dealer/register', async (req, res) => {
   const { name, phone, email, password, age, address, locationLink, shopName } = req.body;
   try {
-    const hashedPassword = await bcrypt.hash(password, 10);
+    const hashedPassword = await bcrypt.hash(password, 12);
     await pool.execute(
       'INSERT INTO dealers (name, phone, email, age, address, password, location_link, shop_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
       [name, phone, email, age, address, hashedPassword, locationLink, shopName]
@@ -434,6 +436,8 @@ app.get('/dealer/products/:dealerId', async (req, res) => {
   });
 
 
+
+
 app.delete("/api/dealer/products/:productId", async (req, res) => {
   const productId = req.params.productId;
   console.log(`Attempting to delete product with ID: ${productId}`); // Debugging log
@@ -464,74 +468,78 @@ app.post('/api/orders', async (req, res) => {
     return res.status(401).json({ message: "User not signed in." });
   }
 
-  // Example: Save the order in the database
-  // This is simplified and might involve multiple queries depending on your schema
-  const [orderResult] = await pool.query('INSERT INTO orders (user_id, address_id, total_price) VALUES (?, ?, ?)', [userId, addressId, totalPrice]);
-  const orderId = orderResult.insertId;
+  // Ensure you have defined and imported `transporter` earlier in your code
+  // Initialize the transporter for nodemailer with your configuration
 
-  for (const item of items) {
-    // Check if the product exists in the database
-    const [productRows] = await pool.query('SELECT * FROM products WHERE id = ?', [item.productId]);
-  
-    if (productRows.length > 0) {
-      const product = productRows[0];
-      const dealerId = product.dealer_id;
-  
-      // Check if the dealer ID is defined
-      if (dealerId) {
-        const [dealerRows] = await pool.query('SELECT email FROM dealers WHERE id = ?', [dealerId]);
-  
-        if (dealerRows.length > 0) {
-          const dealerEmail = dealerRows[0].email;
-          // Send email to the dealer if email is present
-          await sendEmailToDealer(dealerEmail, item);
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+
+    const [orderResult] = await connection.query('INSERT INTO orders (user_id, address_id, total_price) VALUES (?, ?, ?)', [userId, addressId, totalPrice]);
+    const orderId = orderResult.insertId;
+
+    for (const item of items) {
+      const [productRows] = await connection.query('SELECT * FROM products WHERE id = ?', [item.productId]);
+
+      if (productRows.length > 0) {
+        const product = productRows[0];
+
+        if (product.instockqty >= item.quantity) {
+          const newStock = product.instockqty - item.quantity;
+          await connection.query('UPDATE products SET instockqty = ? WHERE id = ?', [newStock, item.productId]);
+          
+          await connection.query('INSERT INTO order_items (order_id, product_id, quantity) VALUES (?, ?, ?)', [orderId, item.productId, item.quantity]);
+          
+          // Assuming dealerId and dealerEmail logic is fetched correctly
+          // Directly calling sendEmailToDealer here
+          const dealerId = product.dealer_id;
+          const [dealerRows] = await connection.query('SELECT email FROM dealers WHERE id = ?', [dealerId]);
+          if (dealerRows.length > 0) {
+            const dealerEmail = dealerRows[0].email;
+            await sendEmailToDealer(dealerEmail, product, item.quantity); // Make sure to pass the product name and quantity
+          }
+
         } else {
-          console.error(`Dealer with ID ${dealerId} not found.`);
+          throw new Error(`Not enough stock for product ID ${item.productId}`);
         }
-  
-        // Save order details with the correct product_id
-        await pool.query('INSERT INTO order_items (order_id, product_id, quantity) VALUES (?, ?, ?)', [orderId, item.productId, item.quantity]);
       } else {
-        console.error(`Dealer ID not found for product with ID ${item.productId}.`);
+        throw new Error(`Product with ID ${item.productId} not found.`);
       }
-    } else {
-      console.error(`Product with ID ${item.productId} not found.`);
     }
+
+    await connection.query('DELETE FROM cart_items WHERE user_id = ?', [userId]);
+    await connection.commit();
+    res.json({ message: "Order placed successfully", orderId: orderId });
+  } catch (error) {
+    await connection.rollback();
+    console.error('Error placing order:', error);
+    res.status(500).json({ error: "Failed to place order", detail: error.message });
+  } finally {
+    connection.release();
   }
-  
-  
-  res.json({ message: "Order placed successfully", orderId: orderId });
 });
-async function sendEmailToDealer(email, item) {
+
+async function sendEmailToDealer(email, product, quantity) {
   if (!email) {
     console.error('No email recipient specified');
-    return; // Exit function if no email recipient is provided
+    return;
   }
 
   try {
-    // Fetch product details based on product ID
-    const [productRows] = await pool.query('SELECT name, image_url FROM products WHERE id = ?', [item.productId]);
+    const mailOptions = {
+      from: process.env.EMAIL_USER,
+      to: email,
+      subject: 'New Order Notification',
+      text: `You have a new order for the following item: ${product.name} (Quantity: ${quantity}). Please prepare it for shipment.`,
+    };
 
-    if (productRows.length > 0) {
-      const { name, image_url } = productRows[0];
-
-      const mailOptions = {
-        from: process.env.EMAIL_USER,
-        to: email,
-        subject: 'New Order Notification',
-        text: `You have a new order for the following item: ${name} (Quantity: ${item.quantity}). Please prepare it for shipment.`,
-        // Consider using HTML email for better formatting
-      };
-
-      const info = await transporter.sendMail(mailOptions);
-      console.log('Email sent: ' + info.response);
-    } else {
-      console.error(`Product with ID ${item.productId} not found.`);
-    }
+    const info = await transporter.sendMail(mailOptions);
+    console.log('Email sent: ' + info.response);
   } catch (error) {
     console.error('Failed to send email:', error);
   }
 }
+
 
 
 app.get('/dealer/orders', async (req, res) => {
@@ -616,7 +624,90 @@ app.get('/api/products/:productId', async (req, res) => {
   }
 });
 
+//delivery agent backend
 
-app.listen(port, () => {
-  console.log(`Server running on port ${port}`);
+
+app.post('/delivery-agent/signin', async (req, res) => {
+  const { email, password } = req.body;
+
+  try {
+      const query = 'SELECT * FROM agents WHERE email = ?';
+      const [agents] = await pool.query(query, [email]);
+
+      if (agents.length > 0) {
+          const agent = agents[0];
+
+          // Compare the hashed password
+          const match = await bcrypt.compare(password, agent.password);
+          if (match) {
+              // Assuming you're using sessions or JWT for keeping the user logged in
+              req.session.agentId = agent.id; // Or use JWT
+              return res.json({ message: 'Sign-in successful', agentName: agent.name });
+          } else {
+              return res.status(401).json({ message: 'Invalid credentials' });
+          }
+      } else {
+          return res.status(404).json({ message: 'Agent not found' });
+      }
+  } catch (error) {
+      console.error('Sign-in error:', error);
+      res.status(500).json({ message: 'Server error during sign-in' });
+  }
+});
+
+
+app.post('/delivery-agent/register', async (req, res) => {
+  const { name, phone, dob, email, address, vehicle_number, password } = req.body; // Assuming you're receiving a password
+  const otp = Math.floor(100000 + Math.random() * 900000); // Generate 6-digit OTP
+  const otp_expiry = new Date();
+  otp_expiry.setMinutes(otp_expiry.getMinutes() + 10); // OTP expires in 10 minutes
+
+  try {
+    // Hash the password before saving
+    const hashedPassword = await bcrypt.hash(password, saltRounds);
+
+    const query = 'INSERT INTO agents (name, phone, dob, email, address, vehicle_number, otp, otp_expiry, password) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)';
+    await pool.query(query, [name, phone, dob, email, address, vehicle_number, otp, otp_expiry, hashedPassword]); // Include the hashed password
+
+    // Send OTP email
+    const mailOptions = {
+      from: process.env.EMAIL_USER,
+      to: email,
+      subject: 'Verify Your Email',
+      text: `Your OTP is ${otp}. It expires in 10 minutes.`
+    };
+
+    let info = await transporter.sendMail(mailOptions);
+    console.log('OTP Email sent:', info.response);
+    res.json({ message: 'Registered successfully. Please check your email for the OTP.', success: true });
+  } catch (error) {
+    console.error('Error in registration or sending OTP email:', error);
+    res.status(500).json({ message: 'Error during registration. Please try again later.', success: false });
+  }
+});
+
+app.post('/delivery-agent/verify-otp', async (req, res) => {
+  const { email, otp } = req.body;
+
+  try {
+    const query = 'SELECT * FROM agents WHERE email = ? AND otp = ? AND otp_expiry > NOW()';
+    const [results] = await pool.query(query, [email, otp]);
+
+    if (results.length === 0) {
+      return res.status(401).send('Invalid OTP or OTP expired');
+    }
+
+    const updateQuery = 'UPDATE agents SET email_verified = TRUE WHERE email = ?';
+    await pool.query(updateQuery, [email]);
+    res.status(200).send('Email verified successfully');
+  } catch (error) {
+    console.error('Error verifying OTP:', error);
+    res.status(500).send('Error during OTP verification. Please try again later.');
+  }
+});
+
+
+// Server running on port 3001
+app.listen(3001, () => {
+  console.log('Server running on port 3001');
 });
