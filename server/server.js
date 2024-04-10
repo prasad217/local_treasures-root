@@ -706,6 +706,71 @@ app.post('/delivery-agent/verify-otp', async (req, res) => {
   }
 });
 
+app.get('/api/dealers/nearby', async (req, res) => {
+  const userLatitude = parseFloat(req.query.latitude);
+  const userLongitude = parseFloat(req.query.longitude);
+
+  if (!userLatitude || !userLongitude) {
+      return res.status(400).json({ error: 'Please provide latitude and longitude' });
+  }
+
+  try {
+      const [dealers] = await pool.query('SELECT * FROM dealers');
+      const dealersWithDistance = dealers.map(dealer => {
+          const { latitude, longitude } = extractLatLng(dealer.location_link);
+          const distance = calculateDistance(userLatitude, userLongitude, latitude, longitude);
+          return {
+              ...dealer,
+              distance
+          };
+      }).filter(dealer => dealer.distance !== undefined) // Ensure we have distance calculated
+        .sort((a, b) => a.distance - b.distance);
+
+      res.json(dealersWithDistance);
+  } catch (error) {
+      console.error('Error fetching nearby dealers:', error);
+      res.status(500).json({ error: 'Failed to fetch nearby dealers' });
+  }
+});
+
+function extractLatLng(locationLink) {
+  const match = locationLink.match(/q=([-\d.]+),([-\d.]+)/);
+  if (match) {
+      return { latitude: parseFloat(match[1]), longitude: parseFloat(match[2]) };
+  }
+  return {};
+}
+function calculateDistance(lat1, lon1, lat2, lon2) {
+  const R = 6371; // Radius of the earth in km
+  const dLat = deg2rad(lat2-lat1);
+  const dLon = deg2rad(lon2-lon1); 
+  const a = 
+      Math.sin(dLat/2) * Math.sin(dLat/2) +
+      Math.cos(deg2rad(lat1)) * Math.cos(deg2rad(lat2)) * 
+      Math.sin(dLon/2) * Math.sin(dLon/2)
+  ; 
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a)); 
+  const distance = R * c; // Distance in km
+  return distance;
+}
+
+function deg2rad(deg) {
+  return deg * (Math.PI/180);
+}
+
+
+app.get('/api/dealers/:dealerId/products', async (req, res) => {
+  const { dealerId } = req.params;
+
+  try {
+    const [products] = await pool.query('SELECT * FROM products WHERE dealer_id = ?', [dealerId]);
+    res.json(products);
+  } catch (error) {
+    console.error('Error fetching dealer\'s products:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 
 // Server running on port 3001
 app.listen(3001, () => {
