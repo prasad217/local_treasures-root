@@ -295,19 +295,58 @@ app.get('/api/users/addresses', async (req, res) => {
 //dealer backend
 
 app.post('/dealer/register', async (req, res) => {
-  const { name, phone, email, password, age, address, locationLink, shopName } = req.body;
+  const { name, phone, email, password, age, address, shopName } = req.body;
+
+  // Generate a 6-digit random OTP
+  const otp = Math.floor(100000 + Math.random() * 900000).toString();
+  const otp_expiry = new Date();
+  otp_expiry.setMinutes(otp_expiry.getMinutes() + 10); // OTP expires in 10 minutes
+
   try {
     const hashedPassword = await bcrypt.hash(password, 12);
+
+    // Store dealer info along with OTP and its expiry in your database
     await pool.execute(
-      'INSERT INTO dealers (name, phone, email, age, address, password, location_link, shop_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-      [name, phone, email, age, address, hashedPassword, locationLink, shopName]
+      'INSERT INTO dealers (name, phone, email, age, address, password, shop_name, otp, otp_expiry) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [name, phone, email, age, address, hashedPassword, shopName, otp, otp_expiry]
     );
-    res.status(201).json({ message: 'Dealer registered successfully' });
+
+    // Send OTP email
+    const mailOptions = {
+      from: process.env.EMAIL_USER, // Replace with your email
+      to: email,
+      subject: 'Verify Your Email',
+      text: `Your OTP is ${otp}. It expires in 10 minutes.`
+    };
+
+    await transporter.sendMail(mailOptions);
+    console.log('OTP Email sent to:', email);
+    res.json({ message: 'Registered successfully. Please check your email for the OTP.' });
   } catch (error) {
     console.error('Error registering dealer:', error);
     res.status(500).json({ error: 'Server error' });
   }
 });
+app.post('/dealer/verify-otp', async (req, res) => {
+  const { email, otp } = req.body;
+
+  try {
+    const query = 'SELECT * FROM dealers WHERE email = ? AND otp = ? AND otp_expiry > NOW()';
+    const [results] = await pool.query(query, [email, otp]);
+
+    if (results.length === 0) {
+      return res.status(401).send('Invalid OTP or OTP expired');
+    }
+
+    const updateQuery = 'UPDATE dealers SET email_verified = TRUE WHERE email = ?';
+    await pool.query(updateQuery, [email]);
+    res.status(200).send('Email verified successfully');
+  } catch (error) {
+    console.error('Error verifying OTP:', error);
+    res.status(500).send('Error during OTP verification. Please try again later.');
+  }
+});
+
 
 app.post('/dealer/signin', async (req, res) => {
   const { email, password } = req.body;
@@ -706,6 +745,8 @@ app.post('/delivery-agent/verify-otp', async (req, res) => {
   }
 });
 
+//nearby dealers backend
+
 app.get('/api/dealers/nearby', async (req, res) => {
   const userLatitude = parseFloat(req.query.latitude);
   const userLongitude = parseFloat(req.query.longitude);
@@ -768,6 +809,100 @@ app.get('/api/dealers/:dealerId/products', async (req, res) => {
   } catch (error) {
     console.error('Error fetching dealer\'s products:', error);
     res.status(500).json({ error: 'Server error' });
+  }
+});
+
+
+app.post('/api/nearby/cart', async (req, res) => {
+  const { productId } = req.body;
+  const userId = req.session.userId; // Ensure sessions are properly managed
+
+  if (!userId) {
+    return res.status(401).json({
+      error: "User is not signed in. Please sign in to add products to the cart.",
+    });
+  }
+
+  try {
+    const [productRows] = await pool.query('SELECT * FROM products WHERE id = ?', [productId]);
+
+    if (productRows.length === 0) {
+      return res.status(404).json({ error: "Product not found" });
+    }
+
+    const { name, discount_price, image_url } = productRows[0];
+
+    // Assuming a separate table for nearby cart items
+    await pool.execute(
+      "INSERT INTO nearby_cart_items (user_id, product_id, name, price, image_url) VALUES (?, ?, ?, ?, ?)",
+      [userId, productId, name, discount_price, image_url]
+    );
+
+    res.json({ message: "Product added to nearby cart successfully" });
+  } catch (error) {
+    console.error("Error adding product to nearby cart:", error);
+    res.status(500).json({ error: "Failed to add product to nearby cart", detail: error.message });
+  }
+});
+
+// Endpoint to fetch nearby cart items
+app.get('/api/nearby/cart', async (req, res) => {
+  const userId = req.session.userId;
+
+  if (!userId) {
+    return res.status(401).json({ error: "User is not signed in" });
+  }
+
+  try {
+    const [rows] = await pool.query("SELECT * FROM nearby_cart_items WHERE user_id = ?", [userId]);
+    res.json(rows);
+  } catch (error) {
+    console.error("Error fetching nearby cart items:", error);
+    res.status(500).json({ error: "Failed to fetch nearby cart items" });
+  }
+});
+
+// Endpoint to update the quantity of a cart item
+app.patch('/api/nearby/cart/items/:id', async (req, res) => {
+  const { quantity } = req.body;
+  const cartItemId = req.params.id;
+
+  if (!quantity) {
+    return res.status(400).json({ error: "Quantity not provided" });
+  }
+
+  try {
+    const [result] = await pool.execute(
+      "UPDATE nearby_cart_items SET quantity = ? WHERE id = ?",
+      [quantity, cartItemId]
+    );
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ message: "Cart item not found" });
+    }
+
+    res.json({ message: "Quantity updated successfully" });
+  } catch (error) {
+    console.error("Error updating cart item quantity:", error);
+    res.status(500).json({ error: "Failed to update cart item quantity" });
+  }
+});
+
+// Endpoint to delete a cart item
+app.delete('/api/nearby/cart/:id', async (req, res) => {
+  const cartItemId = req.params.id;
+
+  try {
+    const [result] = await pool.execute("DELETE FROM nearby_cart_items WHERE id = ?", [cartItemId]);
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ message: "Cart item not found or already deleted" });
+    }
+
+    res.status(200).json({ message: "Cart item deleted successfully" });
+  } catch (error) {
+    console.error("Error deleting cart item:", error);
+    res.status(500).json({ error: "Internal Server Error" });
   }
 });
 
