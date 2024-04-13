@@ -907,6 +907,52 @@ app.delete('/api/nearby/cart/:id', async (req, res) => {
 });
 
 
+app.get('/api/user/longitude', async (req, res) => {
+  const userId = req.session.userId;
+  if (!userId) {
+    return res.status(401).json({ message: 'Unauthorized. Please log in.' });
+  }
+
+  try {
+    const [user] = await pool.query('SELECT longitude FROM users WHERE id = ?', [userId]);
+    if (user.length > 0) {
+      res.json({ longitude: user[0].longitude });
+    } else {
+      res.status(404).json({ message: 'User not found' });
+    }
+  } catch (error) {
+    console.error('Error fetching user longitude:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Fetch nearby addresses with longitude data
+// Route to fetch nearby addresses based on user's longitude and pincode
+app.get('/api/users/nearby-addresses', async (req, res) => {
+  const userId = req.session.userId;
+  const { pincode } = req.query; // Get the pincode from query parameters
+  if (!userId) {
+    return res.status(401).json({ message: 'Unauthorized. Please log in.' });
+  }
+
+  try {
+    let query = 'SELECT * FROM nearby_addresses WHERE user_id = ?';
+    const queryParams = [userId];
+
+    // If pincode is provided, add it to the query
+    if (pincode) {
+      query += ' AND pincode = ?';
+      queryParams.push(pincode);
+    }
+
+    const [addresses] = await pool.query(query, queryParams);
+    res.json(addresses);
+  } catch (error) {
+    console.error('Error fetching nearby addresses:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 // Server running on port 3001
 app.listen(3001, () => {
   console.log('Server running on port 3001');
