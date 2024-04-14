@@ -1,8 +1,11 @@
+require('dotenv').config();
 const express = require('express');
-const router = express.Router();
-const { register, signin } = require('../controllers/userController');
-
-router.post('/register', register);
-router.post('/signin', signin);
+const mysql = require('mysql2/promise');
+const session = require('express-session');
+const bcrypt = require('bcrypt');
+const cors = require('cors');
+const multer = require('multer');
+const cookieParser = require('cookie-parser');
+const nodemailer = require('nodemailer');
 
 module.exports = router;

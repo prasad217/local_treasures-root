@@ -812,10 +812,9 @@ app.get('/api/dealers/:dealerId/products', async (req, res) => {
   }
 });
 
-
 app.post('/api/nearby/cart', async (req, res) => {
-  const { productId } = req.body;
-  const userId = req.session.userId; // Ensure sessions are properly managed
+  const { productId, quantity = 1 } = req.body;  // Default quantity to 1 if not provided
+  const userId = req.session.userId;
 
   if (!userId) {
     return res.status(401).json({
@@ -825,17 +824,23 @@ app.post('/api/nearby/cart', async (req, res) => {
 
   try {
     const [productRows] = await pool.query('SELECT * FROM products WHERE id = ?', [productId]);
-
     if (productRows.length === 0) {
       return res.status(404).json({ error: "Product not found" });
     }
 
-    const { name, discount_price, image_url } = productRows[0];
+    const { name, discount_price, image_url, dealer_id } = productRows[0];
+    const [currentCart] = await pool.query('SELECT * FROM nearby_cart_items WHERE user_id = ?', [userId]);
+    
+    if (currentCart.length > 0 && currentCart[0].dealer_id !== dealer_id) {
+      return res.status(409).json({
+        error: "Cart contains items from a different dealer.",
+        actionRequired: "replace"  // Indicate that replacement is needed
+      });
+    }
 
-    // Assuming a separate table for nearby cart items
     await pool.execute(
-      "INSERT INTO nearby_cart_items (user_id, product_id, name, price, image_url) VALUES (?, ?, ?, ?, ?)",
-      [userId, productId, name, discount_price, image_url]
+      "INSERT INTO nearby_cart_items (user_id, product_id, name, price, image_url, quantity, dealer_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      [userId, productId, name, discount_price, image_url, quantity, dealer_id]
     );
 
     res.json({ message: "Product added to nearby cart successfully" });
@@ -844,6 +849,38 @@ app.post('/api/nearby/cart', async (req, res) => {
     res.status(500).json({ error: "Failed to add product to nearby cart", detail: error.message });
   }
 });
+
+app.post('/api/nearby/cart/replace', async (req, res) => {
+  const { productId, quantity, dealerId } = req.body;
+  const userId = req.session.userId;
+
+  if (!userId) {
+    return res.status(401).json({ error: "User is not signed in" });
+  }
+
+  try {
+    // Delete the existing items
+    await pool.execute("DELETE FROM nearby_cart_items WHERE user_id = ?", [userId]);
+
+    // Insert the new item
+    const [productRows] = await pool.query('SELECT * FROM products WHERE id = ?', [productId]);
+    if (productRows.length === 0) {
+      return res.status(404).json({ error: "Product not found" });
+    }
+    const { name, discount_price, image_url } = productRows[0];
+
+    await pool.execute(
+      "INSERT INTO nearby_cart_items (user_id, product_id, name, price, image_url, quantity, dealer_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      [userId, productId, name, discount_price, image_url, quantity, dealerId]
+    );
+
+    res.json({ message: "Cart replaced and new product added successfully" });
+  } catch (error) {
+    console.error("Error replacing cart:", error);
+    res.status(500).json({ error: "Failed to replace cart", detail: error.message });
+  }
+});
+
 
 // Endpoint to fetch nearby cart items
 app.get('/api/nearby/cart', async (req, res) => {
@@ -923,6 +960,28 @@ app.get('/api/user/longitude', async (req, res) => {
   } catch (error) {
     console.error('Error fetching user longitude:', error);
     res.status(500).json({ error: 'Server error' });
+  }
+});
+
+app.post('/api/nearby/address', async (req, res) => {
+  const { name, door_no, address_lane, landmark, pincode, city, state, phonenumber } = req.body;
+  const userId = req.session.userId; // Assuming you have user authentication and session management
+
+  if (!userId) {
+    return res.status(401).json({ error: "User is not signed in" });
+  }
+
+  try {
+    // Save the address details to the database
+    await pool.execute(
+      "INSERT INTO nearby_addresses (user_id, name, door_no, address_lane, landmark, pincode, city, state, phonenumber, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      [userId, name, door_no, address_lane, landmark, pincode, city, state, phonenumber, new Date()]
+    );
+
+    res.json({ message: "Address added successfully" });
+  } catch (error) {
+    console.error("Error adding address:", error);
+    res.status(500).json({ error: "Failed to add address" });
   }
 });
 
