@@ -50,7 +50,8 @@ app.use(session({
   cookie: {
     httpOnly: true,
     secure: false, // Consider environment to set appropriately
-    sameSite: 'lax'
+    sameSite: 'lax',
+    expires: null
   }
 }));
 
@@ -1011,6 +1012,116 @@ app.get('/api/users/nearby-addresses', async (req, res) => {
     res.status(500).json({ error: 'Server error' });
   }
 });
+
+app.post('/api/nearby/orders', async (req, res) => {
+  const { addressId, items, totalPrice } = req.body;
+  const userId = req.session.userId;
+
+  if (!userId) {
+    return res.status(401).json({ message: "User not signed in." });
+  }
+
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+
+    // Fetch the last formatted order ID and calculate the new one
+    const [lastOrder] = await connection.query('SELECT formatted_order_id FROM nearby_orders ORDER BY id DESC LIMIT 1');
+    let nextOrderIdNumber = 1;
+    if (lastOrder.length > 0) {
+      nextOrderIdNumber = parseInt(lastOrder[0].formatted_order_id) + 1;
+    }
+    const formattedOrderId = nextOrderIdNumber.toString().padStart(6, '0');
+
+    // Determine the estimated delivery date based on order time
+    const orderTime = new Date();
+    const deliveryDate = new Date();
+    if (orderTime.getHours() < 9 || orderTime.getHours() >= 21) {
+      deliveryDate.setDate(deliveryDate.getDate() + 1); // Set to the next day if before 9 AM or after 9 PM
+    }
+
+    // Insert the order into the nearby_orders table with the new formatted order ID
+    const [orderResult] = await connection.query(
+      'INSERT INTO nearby_orders (user_id, address_id, total_price, formatted_order_id, estimated_delivery) VALUES (?, ?, ?, ?, ?)',
+      [userId, addressId, totalPrice, formattedOrderId, deliveryDate]
+    );
+    const orderId = orderResult.insertId;
+
+    // Process each item in the order
+    for (const item of items) {
+      // Fetch product details including the dealer ID
+      const [productRows] = await connection.query(
+        'SELECT * FROM products WHERE id = ?',
+        [item.productId]
+      );
+      if (productRows.length === 0) {
+        throw new Error("Product not found");
+      }
+
+      const product = productRows[0];
+      if (product.instockqty < item.quantity) {
+        throw new Error("Insufficient stock for product ID " + item.productId);
+      }
+
+      // Update the stock quantity
+      const newStock = product.instockqty - item.quantity;
+      await connection.query(
+        'UPDATE products SET instockqty = ? WHERE id = ?',
+        [newStock, item.productId]
+      );
+
+      // Insert the order item
+      await connection.query(
+        'INSERT INTO nearby_order_items (order_id, product_id, quantity, price) VALUES (?, ?, ?, ?)',
+        [orderId, item.productId, item.quantity, product.discount_price]
+      );
+
+      // Get dealer info and send email
+      const [dealerRows] = await connection.query(
+        'SELECT email FROM dealers WHERE id = ?',
+        [product.dealer_id]
+      );
+      if (dealerRows.length > 0) {
+        const dealerEmail = dealerRows[0].email;
+        sendEmailToDealer(dealerEmail, product.name, item.quantity);
+      }
+    }
+
+    // Delete cart items after order is placed successfully
+    await connection.query(
+      'DELETE FROM nearby_cart_items WHERE user_id = ?',
+      [userId]
+    );
+
+    // Commit transaction
+    await connection.commit();
+    res.status(201).json({ message: "Order placed successfully", orderId: formattedOrderId, estimatedDelivery: deliveryDate.toISOString().split('T')[0] });
+  } catch (error) {
+    await connection.rollback();
+    console.error('Order placement failed:', error);
+    res.status(500).json({ error: "Order placement failed", details: error.message });
+  } finally {
+    connection.release();
+  }
+});
+
+async function sendEmailToDealer(email, productName, quantity) {
+  const mailOptions = {
+    from: process.env.EMAIL_USER,
+    to: email,
+    subject: 'New Order Received',
+    text: `You have received a new order for ${quantity} unit(s) of ${productName}. Please check your dashboard for details.`
+  };
+
+  transporter.sendMail(mailOptions, function(error, info) {
+    if (error) {
+      console.log('Error sending email:', error);
+    } else {
+      console.log('Email sent: ' + info.response);
+    }
+  });
+}
+
 
 // Server running on port 3001
 app.listen(3001, () => {
