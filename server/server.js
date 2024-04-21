@@ -294,22 +294,23 @@ app.get('/api/users/addresses', async (req, res) => {
 
 
 //dealer backend
-
 app.post('/dealer/register', async (req, res) => {
-  const { name, phone, email, password, age, address, shopName } = req.body;
-
-  // Generate a 6-digit random OTP
-  const otp = Math.floor(100000 + Math.random() * 900000).toString();
-  const otp_expiry = new Date();
-  otp_expiry.setMinutes(otp_expiry.getMinutes() + 10); // OTP expires in 10 minutes
+  const { name, phone, email, password, age, address, locationLink, shopName, shopGST } = req.body;
 
   try {
-    const hashedPassword = await bcrypt.hash(password, 12);
+    // Generate a salt and hash the password
+    const salt = await bcrypt.genSalt(12); // Generate a salt with cost factor 12
+    const hashedPassword = await bcrypt.hash(password, salt);
+
+    // Generate a 6-digit random OTP
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    const otpExpiry = new Date();
+    otpExpiry.setMinutes(otpExpiry.getMinutes() + 10); // OTP expires in 10 minutes
 
     // Store dealer info along with OTP and its expiry in your database
     await pool.execute(
-      'INSERT INTO dealers (name, phone, email, age, address, password, shop_name, otp, otp_expiry) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      [name, phone, email, age, address, hashedPassword, shopName, otp, otp_expiry]
+      'INSERT INTO dealers (name, phone, email, age, address, password, location_link, shop_name, shopGST, otp, otp_expiry) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [name, phone, email, age, address, hashedPassword, locationLink, shopName, shopGST, otp, otpExpiry]
     );
 
     // Send OTP email
@@ -328,49 +329,94 @@ app.post('/dealer/register', async (req, res) => {
     res.status(500).json({ error: 'Server error' });
   }
 });
+
+
+// Route to handle OTP verification
 app.post('/dealer/verify-otp', async (req, res) => {
   const { email, otp } = req.body;
 
-  try {
-    const query = 'SELECT * FROM dealers WHERE email = ? AND otp = ? AND otp_expiry > NOW()';
-    const [results] = await pool.query(query, [email, otp]);
+  if (!email || !otp) {
+    return res.status(400).json({ error: 'Email and OTP must be provided' });
+  }
 
-    if (results.length === 0) {
-      return res.status(401).send('Invalid OTP or OTP expired');
+  try {
+    const [results] = await pool.execute('SELECT * FROM dealers WHERE email = ?', [email]);
+    const dealer = results[0]; // Ensure you are correctly getting the first result
+
+    if (!dealer) {
+      return res.status(404).json({ error: 'Dealer not found' });
     }
 
-    const updateQuery = 'UPDATE dealers SET email_verified = TRUE WHERE email = ?';
-    await pool.query(updateQuery, [email]);
-    res.status(200).send('Email verified successfully');
+    if (dealer.otp !== otp) {
+      return res.status(400).json({ error: 'Invalid OTP' });
+    }
+
+    const currentDateTime = new Date();
+    if (currentDateTime > new Date(dealer.otp_expiry)) {
+      return res.status(400).json({ error: 'OTP has expired' });
+    }
+
+    // Update dealer's status after successful OTP verification
+    await pool.execute('UPDATE dealers SET verified = 1 WHERE email = ?', [email]);
+
+    res.json({ message: 'OTP verification successful' });
   } catch (error) {
     console.error('Error verifying OTP:', error);
-    res.status(500).send('Error during OTP verification. Please try again later.');
-  }
-});
-
-
-app.post('/dealer/signin', async (req, res) => {
-  const { email, password } = req.body;
-  try {
-    const [rows] = await pool.query('SELECT id, password FROM dealers WHERE email = ?', [email]);
-
-    if (rows.length === 0) {
-      return res.status(401).json({ error: 'Invalid credentials' });
-    }
-    const dealer = rows[0];
-    if (await bcrypt.compare(password, dealer.password)) {
-      // Authenticate and set dealerId in session rather than a cookie
-      req.session.dealerId = dealer.id; // Securely set dealerId in the session
-
-      res.json({ message: 'Sign-in successful' });
-    } else {
-      return res.status(401).json({ error: 'Invalid credentials' });
-    }
-  } catch (error) {
-    console.error('Error:', error);
     res.status(500).json({ error: 'Server error' });
   }
+});app.post('/dealer/signin', async (req, res) => {
+  const { email, password } = req.body;
+
+  async function sendOtpEmail(email, otp) {
+      const mailOptions = {
+          from: process.env.EMAIL_USER,
+          to: email,
+          subject: 'OTP Verification',
+          text: `Your OTP is: ${otp}. It is valid for the next 10 minutes only.`
+      };
+
+      try {
+          await transporter.sendMail(mailOptions);
+          console.log(`OTP Email sent successfully to ${email}`);
+      } catch (error) {
+          console.error('Failed to send OTP email:', error);
+      }
+  }
+
+  try {
+      const [rows] = await pool.query('SELECT id, password, verified, otp FROM dealers WHERE email = ?', [email]);
+
+      if (rows.length === 0) {
+          return res.status(401).json({ error: 'Invalid credentials' });
+      }
+
+      const dealer = rows[0];
+
+      if (!dealer.verified) {
+          // Dealer is not verified, send a new OTP
+          const otp = Math.floor(100000 + Math.random() * 900000).toString(); // Generate a new OTP
+          const otpExpiry = new Date();
+          otpExpiry.setMinutes(otpExpiry.getMinutes() + 10); // OTP expires in 10 minutes
+
+          await pool.query('UPDATE dealers SET otp = ?, otp_expiry = ? WHERE email = ?', [otp, otpExpiry, email]);
+          await sendOtpEmail(email, otp);  // Call the local sendOtpEmail function
+
+          return res.status(403).json({ error: 'Account not verified. We have sent a new OTP to your email.', resendOTP: true });
+      }
+
+      // Check password only if the dealer is verified
+      if (await bcrypt.compare(password, dealer.password)) {
+          req.session.dealerId = dealer.id; // Establish a session for the verified dealer
+          res.json({ message: 'Sign-in successful' });
+      } else {
+          return res.status(401).json({ error: 'Invalid credentials' });
+      }
+  } catch (error) {
+      console.error('Error during dealer sign-in:', error);
+      res.status(500).json({ error: 'Server error' });
+  }
 });
+
 
 
 app.post('/logout', (req, res) => {
