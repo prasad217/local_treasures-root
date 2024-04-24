@@ -8,7 +8,7 @@ const multer = require('multer');
 const cookieParser = require('cookie-parser');
 const nodemailer = require('nodemailer');
 const crypto = require('crypto');
-
+const path = require('path');
 
 const saltRounds = 10; // Recommended value
 const app = express();
@@ -24,12 +24,15 @@ app.use(express.json());
 
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
-    cb(null, '/Users/prasad/Desktop/react-version1 copy/server/uploads/');
+    cb(null, '/Users/prasad/Desktop/main project/local_treasures-root/server/uploads');
   },
   filename: function (req, file, cb) {
     cb(null, Date.now() + '-' + file.originalname);
   }
 });
+app.use('/uploads', express.static('/Users/prasad/Desktop/main project/local_treasures-root/server/uploads'));
+
+
 
 const upload = multer({ storage: storage });
 
