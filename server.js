@@ -12,7 +12,7 @@ const path = require('path');
 
 const saltRounds = 10; // Recommended value
 const app = express();
-const port = 3001;
+const port = process.env.PORT || 3001;
 
 app.use(cors({
   origin: 'http://localhost:3000',
@@ -24,41 +24,48 @@ app.use(express.json());
 
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
-    cb(null, '/Users/prasad/Desktop/main project/local_treasures-root/server/uploads');
+    cb(null, path.join(__dirname, 'uploads'));
   },
   filename: function (req, file, cb) {
     cb(null, Date.now() + '-' + file.originalname);
   }
 });
-app.use('/uploads', express.static('/Users/prasad/Desktop/main project/local_treasures-root/server/uploads'));
-
-
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 const upload = multer({ storage: storage });
 
-const dbOptions = {
-  host: process.env.DB_HOST || 'localhost',
-  user: process.env.DB_USER || 'root',
-  password: process.env.DB_PASSWORD || '',
-  database: process.env.DB_NAME || 'happy'
-};
+let dbOptions;
+if (process.env.NODE_ENV === 'production') {
+  dbOptions = {
+    host: process.env.DB_HOST,
+    user: process.env.DB_USER,
+    password: process.env.DB_PASSWORD,
+    database: process.env.DB_NAME,
+    port: process.env.DB_PORT
+  };
+} else {
+  dbOptions = {
+    host: process.env.DB_HOST_LOCAL,
+    user: process.env.DB_USER_LOCAL,
+    password: process.env.DB_PASSWORD_LOCAL,
+    database: process.env.DB_NAME_LOCAL,
+    port: process.env.DB_PORT_LOCAL
+  };
+}
 
 const pool = mysql.createPool(dbOptions);
 
-// Create session middleware with default session store
 app.use(session({
-  secret: 'keyboard cat',
+  secret: process.env.SESSION_SECRET,
   resave: false,
   saveUninitialized: false,
   cookie: {
     httpOnly: true,
-    secure: false, // Consider environment to set appropriately
+    secure: process.env.NODE_ENV === 'production', // Set to true in production
     sameSite: 'lax',
     expires: null
   }
 }));
-
-
 
 const transporter = nodemailer.createTransport({
   service: 'gmail',
@@ -67,6 +74,18 @@ const transporter = nodemailer.createTransport({
     pass: process.env.EMAIL_PASS
   }
 });
+
+app.get('/test-db', async (req, res) => {
+  try {
+    const connection = await pool.getConnection();
+    await connection.query('SELECT 1');
+    connection.release();
+    res.send('Database connection successful!');
+  } catch (error) {
+    res.status(500).send('Database connection failed: ' + error.message);
+  }
+});
+
 
 app.set('trust proxy', 1);
 
@@ -1274,6 +1293,8 @@ app.get('/api/user/suggestions', async (req, res) => {
     res.status(500).json({ error: 'Server error' });
   }
 });
+
+
 
 // Server running on port 3001
 app.listen(3001, () => {
