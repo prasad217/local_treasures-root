@@ -1,13 +1,4 @@
 {
-<<<<<<< HEAD
-  "name": "server",
-  "version": "1.0.0",
-  "description": "",
-  "main": "server.js",
-  "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "nodemon server.js"
-=======
   "name": "react-version1-copy",
   "version": "1.0.0",
   "description": "",
@@ -17,13 +8,11 @@
     "start": "concurrently \"npm run start:front-end\" \"npm run start:server\"",
     "start:front-end": "cd front-end && npm start",
     "start:server": "cd server && npm start"
->>>>>>> 249db173461c02299a6906a6806082d4af394d5f
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "dependencies": {
-<<<<<<< HEAD
     "bcrypt": "^5.1.1",
     "body-parser": "^1.20.2",
     "connect-redis": "^7.1.1",
@@ -37,12 +26,10 @@
     "mysql2": "^3.9.2",
     "nodemailer": "^6.9.13",
     "react-router-dom": "^6.22.3",
-    "redis": "^4.6.13"
+    "redis": "^4.6.13",
+    "concurrently": "^8.2.2"
   },
   "devDependencies": {
     "nodemon": "^3.1.0"
-=======
-    "concurrently": "^8.2.2"
->>>>>>> 249db173461c02299a6906a6806082d4af394d5f
   }
 }
