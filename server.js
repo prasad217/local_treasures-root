@@ -2,8 +2,8 @@ require('dotenv').config();
 const express = require('express');
 const mysql = require('mysql2/promise');
 const session = require('express-session');
-const RedisStore = require('connect-redis')(session);
-const redis = require('redis');
+const Redis = require('redis');
+const connectRedis = require('connect-redis');
 const bcrypt = require('bcryptjs');
 const cors = require('cors');
 const multer = require('multer');
@@ -46,13 +46,14 @@ const dbOptions = {
 const pool = mysql.createPool(dbOptions);
 
 // Create Redis client
-const redisClient = redis.createClient({
+const redisClient = Redis.createClient({
   url: process.env.REDIS_URL,
   legacyMode: true
 });
 redisClient.connect().catch(console.error);
 
 // Configure session store
+const RedisStore = connectRedis(session);
 app.use(session({
   store: new RedisStore({ client: redisClient }),
   secret: 'your-secret-key',
@@ -75,7 +76,6 @@ const transporter = nodemailer.createTransport({
 });
 
 app.set('trust proxy', 1);
-
 
 //user backend
 app.post('/signin', async (req, res) => {
