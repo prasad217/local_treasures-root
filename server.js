@@ -3,7 +3,7 @@ const express = require('express');
 const mysql = require('mysql2/promise');
 const session = require('express-session');
 const Redis = require('redis');
-const redisStore = require('connect-redis')(session); // Correct import
+const RedisStore = require('connect-redis').default;
 const bcrypt = require('bcryptjs');
 const cors = require('cors');
 const multer = require('multer');
@@ -26,21 +26,21 @@ app.use(express.json());
 
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
-    cb(null, '/Users/prasad/Desktop/main project/local_treasures-root/server/uploads');
+    cb(null, path.join(__dirname, 'uploads'));
   },
   filename: function (req, file, cb) {
     cb(null, Date.now() + '-' + file.originalname);
   }
 });
-app.use('/uploads', express.static('/Users/prasad/Desktop/main project/local_treasures-root/server/uploads'));
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 const upload = multer({ storage: storage });
 
 const dbOptions = {
-  host: process.env.DB_HOST || 'localhost',
-  user: process.env.DB_USER || 'root',
-  password: process.env.DB_PASSWORD || '',
-  database: process.env.DB_NAME || 'happy'
+  host: process.env.DB_HOST,
+  user: process.env.DB_USER,
+  password: process.env.DB_PASSWORD,
+  database: process.env.DB_NAME
 };
 
 const pool = mysql.createPool(dbOptions);
@@ -54,13 +54,13 @@ redisClient.connect().catch(console.error);
 
 // Configure session store
 app.use(session({
-  store: new redisStore({ client: redisClient }), // Use redisStore here
+  store: new RedisStore({ client: redisClient }),
   secret: 'your-secret-key',
   resave: false,
   saveUninitialized: false,
   cookie: {
     httpOnly: true,
-    secure: process.env.NODE_ENV === 'production', // Set to true in production
+    secure: process.env.NODE_ENV === 'production',
     sameSite: 'lax',
     expires: null
   }
@@ -75,6 +75,7 @@ const transporter = nodemailer.createTransport({
 });
 
 app.set('trust proxy', 1);
+
 
 //user backend
 app.post('/signin', async (req, res) => {
