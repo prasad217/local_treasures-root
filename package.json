@@ -14,8 +14,9 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "bcrypt": "^5.1.1",
+    "bcryptjs": "^2.4.3",
     "body-parser": "^1.20.2",
+    "concurrently": "^8.2.2",
     "connect-redis": "^7.1.1",
     "cookie-parser": "^1.4.6",
     "cors": "^2.8.5",
@@ -27,8 +28,7 @@
     "mysql2": "^3.9.2",
     "nodemailer": "^6.9.13",
     "react-router-dom": "^6.22.3",
-    "redis": "^4.6.13",
-    "concurrently": "^8.2.2"
+    "redis": "^4.6.13"
   },
   "devDependencies": {
     "nodemon": "^3.1.0"
