@@ -2,6 +2,8 @@ require('dotenv').config();
 const express = require('express');
 const mysql = require('mysql2/promise');
 const session = require('express-session');
+const RedisStore = require('connect-redis')(session);
+const redis = require('redis');
 const bcrypt = require('bcryptjs');
 const cors = require('cors');
 const multer = require('multer');
@@ -12,7 +14,7 @@ const path = require('path');
 
 const saltRounds = 10; // Recommended value
 const app = express();
-const port = 3001;
+const port = process.env.PORT || 3001;
 
 app.use(cors({
   origin: 'http://localhost:3000',
@@ -32,8 +34,6 @@ const storage = multer.diskStorage({
 });
 app.use('/uploads', express.static('/Users/prasad/Desktop/main project/local_treasures-root/server/uploads'));
 
-
-
 const upload = multer({ storage: storage });
 
 const dbOptions = {
@@ -45,20 +45,26 @@ const dbOptions = {
 
 const pool = mysql.createPool(dbOptions);
 
-// Create session middleware with default session store
+// Create Redis client
+const redisClient = redis.createClient({
+  url: process.env.REDIS_URL,
+  legacyMode: true
+});
+redisClient.connect().catch(console.error);
+
+// Configure session store
 app.use(session({
-  secret: 'keyboard cat',
+  store: new RedisStore({ client: redisClient }),
+  secret: 'your-secret-key',
   resave: false,
   saveUninitialized: false,
   cookie: {
     httpOnly: true,
-    secure: false, // Consider environment to set appropriately
+    secure: process.env.NODE_ENV === 'production', // Set to true in production
     sameSite: 'lax',
     expires: null
   }
 }));
-
-
 
 const transporter = nodemailer.createTransport({
   service: 'gmail',
@@ -69,6 +75,7 @@ const transporter = nodemailer.createTransport({
 });
 
 app.set('trust proxy', 1);
+
 
 //user backend
 app.post('/signin', async (req, res) => {
