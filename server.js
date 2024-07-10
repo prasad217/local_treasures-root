@@ -3,7 +3,7 @@ const express = require('express');
 const mysql = require('mysql2/promise');
 const session = require('express-session');
 const Redis = require('redis');
-const connectRedis = require('connect-redis');
+const redisStore = require('connect-redis')(session); // Correct import
 const bcrypt = require('bcryptjs');
 const cors = require('cors');
 const multer = require('multer');
@@ -53,9 +53,8 @@ const redisClient = Redis.createClient({
 redisClient.connect().catch(console.error);
 
 // Configure session store
-const RedisStore = connectRedis(session);
 app.use(session({
-  store: new RedisStore({ client: redisClient }),
+  store: new redisStore({ client: redisClient }), // Use redisStore here
   secret: 'your-secret-key',
   resave: false,
   saveUninitialized: false,
