@@ -2,8 +2,6 @@ require('dotenv').config();
 const express = require('express');
 const mysql = require('mysql2/promise');
 const session = require('express-session');
-const Redis = require('redis');
-const RedisStore = require('connect-redis').default;
 const bcrypt = require('bcryptjs');
 const cors = require('cors');
 const multer = require('multer');
@@ -11,10 +9,12 @@ const cookieParser = require('cookie-parser');
 const nodemailer = require('nodemailer');
 const crypto = require('crypto');
 const path = require('path');
+const Redis = require('ioredis'); // Import ioredis
+const RedisStore = require("connect-redis").default
 
 const saltRounds = 10; // Recommended value
 const app = express();
-const port = process.env.PORT || 3001;
+const port = process.env.PORT || 3001; // Use environment variable for port
 
 app.use(cors({
   origin: 'http://localhost:3000',
@@ -26,41 +26,41 @@ app.use(express.json());
 
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
-    cb(null, path.join(__dirname, 'uploads'));
+    cb(null, '/Users/prasad/Desktop/main project/local_treasures-root/server/uploads');
   },
   filename: function (req, file, cb) {
     cb(null, Date.now() + '-' + file.originalname);
   }
 });
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+app.use('/uploads', express.static('/Users/prasad/Desktop/main project/local_treasures-root/server/uploads'));
 
 const upload = multer({ storage: storage });
 
 const dbOptions = {
-  host: process.env.DB_HOST,
-  user: process.env.DB_USER,
-  password: process.env.DB_PASSWORD,
-  database: process.env.DB_NAME
+  host: process.env.DB_HOST || 'localhost',
+  user: process.env.DB_USER || 'root',
+  password: process.env.DB_PASSWORD || '',
+  database: process.env.DB_NAME || 'happy'
 };
 
 const pool = mysql.createPool(dbOptions);
 
-// Create Redis client
-const redisClient = Redis.createClient({
-  url: process.env.REDIS_URL,
-  legacyMode: true
+// Create Redis client configuration
+const redisClient = new Redis({
+  host: process.env.REDIS_HOST || 'localhost',
+  port: process.env.REDIS_PORT || 6379,
+  password: process.env.REDIS_PASSWORD || '',
 });
-redisClient.connect().catch(console.error);
 
-// Configure session store
+// Create session middleware with RedisStore
 app.use(session({
   store: new RedisStore({ client: redisClient }),
-  secret: 'your-secret-key',
+  secret: process.env.SESSION_SECRET || 'keyboard cat',
   resave: false,
   saveUninitialized: false,
   cookie: {
     httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
+    secure: false, // Consider setting to true in production with HTTPS
     sameSite: 'lax',
     expires: null
   }
