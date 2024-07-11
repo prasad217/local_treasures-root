@@ -52,6 +52,15 @@ const redisClient = new Redis({
   password: process.env.REDIS_PASSWORD || '',
 });
 
+// Add Redis connection error handling
+redisClient.on('error', (err) => {
+  console.error('Redis error:', err);
+});
+
+redisClient.on('connect', () => {
+  console.log('Connected to Redis');
+});
+
 // Create session middleware with RedisStore
 app.use(session({
   store: new RedisStore({ client: redisClient }),
@@ -75,8 +84,6 @@ const transporter = nodemailer.createTransport({
 });
 
 app.set('trust proxy', 1);
-
-
 //user backend
 app.post('/signin', async (req, res) => {
   const { email, password } = req.body;
