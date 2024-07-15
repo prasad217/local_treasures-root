@@ -52,7 +52,6 @@ const redisClient = new Redis({
   password: process.env.REDIS_PASSWORD || '',
 });
 
-// Add Redis connection error handling
 redisClient.on('error', (err) => {
   console.error('Redis error:', err);
 });
@@ -61,7 +60,7 @@ redisClient.on('connect', () => {
   console.log('Connected to Redis');
 });
 
-// Create session middleware with RedisStore
+
 app.use(session({
   store: new RedisStore({ client: redisClient }),
   secret: process.env.SESSION_SECRET || 'keyboard cat',
@@ -84,6 +83,7 @@ const transporter = nodemailer.createTransport({
 });
 
 app.set('trust proxy', 1);
+
 //user backend
 app.post('/signin', async (req, res) => {
   const { email, password } = req.body;
@@ -1289,7 +1289,6 @@ app.get('/api/user/suggestions', async (req, res) => {
   }
 });
 
-// Server running on port 3001
 app.listen(3001, () => {
   console.log('Server running on port 3001');
 });

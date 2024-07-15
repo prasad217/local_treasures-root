@@ -1,34 +1,71 @@
-const bcrypt = require('bcrypt');
-const pool = require('../utils/dbUtils');
+// controllers/userController.js
 
-async function register(req, res) {
-  const { username, email, password } = req.body;
-  try {
-    const hashedPassword = await bcrypt.hash(password, 10);
-    await pool.execute('INSERT INTO users (username, email, password) VALUES (?, ?, ?)', [username, email, hashedPassword]);
-    res.status(201).json({ message: 'User registered successfully' });
-  } catch (error) {
-    res.status(500).json({ error: 'Server error', detail: error.message });
+const userModel = require('../models/userModel');
+const addressModel = require('../models/addressModel');
+
+const getUserInfo = async (req, res) => {
+  const userId = req.session.userId;
+
+  if (!userId) {
+    return res.status(401).json({ message: 'Unauthorized. Please log in.' });
   }
-}
 
-async function signin(req, res) {
-  const { email, password } = req.body;
   try {
-    const [rows] = await pool.query('SELECT id, password FROM users WHERE email = ?', [email]);
-    if (rows.length === 0) {
-      return res.status(401).json({ error: 'Invalid credentials' });
-    }
-    const user = rows[0];
-    if (await bcrypt.compare(password, user.password)) {
-      req.session.userId = user.id;
-      res.json({ userId: user.id, message: 'User sign-in successful' });
+    const user = await userModel.getUserById(userId);
+    if (user) {
+      res.json(user);
     } else {
-      return res.status(401).json({ error: 'Invalid credentials' });
+      res.status(404).json({ message: 'User not found' });
     }
   } catch (error) {
-    res.status(500).json({ error: 'Server error', detail: error.message });
+    console.error('Error fetching user info:', error);
+    res.status(500).json({ error: 'Server error' });
   }
-}
+};
 
-module.exports = { register, signin };
+const saveUserAddress = async (req, res) => {
+  const userId = req.session.userId;
+
+  if (!userId) {
+    return res.status(401).json({ message: 'Unauthorized. Please log in.' });
+  }
+
+  const { name, door_no, address_lane, landmark, pincode, city, state, phonenumber } = req.body;
+
+  try {
+    await addressModel.saveOrUpdateAddress(userId, name, door_no, address_lane, landmark, pincode, city, state, phonenumber);
+
+    const addresses = await addressModel.getAddressByUserId(userId);
+    
+    if (addresses.length > 0) {
+      res.json(addresses[0]);
+    } else {
+      res.status(404).json({ message: 'Address not found after saving.' });
+    }
+  } catch (error) {
+    console.error('Error saving or fetching user address:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+};
+
+const getUserAddresses = async (req, res) => {
+  const userId = req.session.userId;
+
+  if (!userId) {
+    return res.status(401).json({ message: 'Unauthorized. Please log in.' });
+  }
+
+  try {
+    const addresses = await addressModel.getAddressByUserId(userId);
+    res.json(addresses);
+  } catch (error) {
+    console.error('Error fetching addresses:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+};
+
+module.exports = {
+  getUserInfo,
+  saveUserAddress,
+  getUserAddresses
+};
