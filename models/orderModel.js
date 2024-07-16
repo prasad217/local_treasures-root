@@ -6,26 +6,24 @@ const placeOrder = async (userId, addressId, totalPrice, items) => {
   try {
     await connection.beginTransaction();
 
-    const [orderResult] = await connection.query('INSERT INTO orders (user_id, address_id, total_price) VALUES (?, ?, ?)', [userId, addressId, totalPrice]);
-    const orderId = orderResult.insertId;
+    const [orderResult] = await connection.query('CALL normalCreateOrder(?, ?, ?, @orderId)', [userId, addressId, totalPrice]);
+    const [orderIdResult] = await connection.query('SELECT @orderId AS orderId');
+    const orderId = orderIdResult[0].orderId;
 
     for (const item of items) {
-      const [productRows] = await connection.query('SELECT * FROM products WHERE id = ?', [item.productId]);
-
+      const [productRows] = await connection.query('CALL getProduct(?)', [item.productId]);
       if (productRows.length > 0) {
-        const product = productRows[0];
+        const product = productRows[0][0]; // Stored procedure results are wrapped in an extra array
 
         if (product.instockqty >= item.quantity) {
           const newStock = product.instockqty - item.quantity;
-          await connection.query('UPDATE products SET instockqty = ? WHERE id = ?', [newStock, item.productId]);
+          await connection.query('CALL normalUpdateProductStock(?, ?)', [item.productId, newStock]);
+          await connection.query('CALL normalCreateOrderItem(?, ?, ?)', [orderId, item.productId, item.quantity]);
 
-          await connection.query('INSERT INTO order_items (order_id, product_id, quantity) VALUES (?, ?, ?)', [orderId, item.productId, item.quantity]);
-
-          // Sending email to dealer
           const dealerId = product.dealer_id;
-          const [dealerRows] = await connection.query('SELECT email FROM dealers WHERE id = ?', [dealerId]);
+          const [dealerRows] = await connection.query('CALL getDealerEmail(?)', [dealerId]);
           if (dealerRows.length > 0) {
-            const dealerEmail = dealerRows[0].email;
+            const dealerEmail = dealerRows[0][0].email; // Stored procedure results are wrapped in an extra array
             await sendEmailToDealer(dealerEmail, product.name, item.quantity);
           }
 
@@ -67,16 +65,10 @@ async function sendEmailToDealer(email, productName, quantity) {
 
 const getOrderHistoryByUserId = async (userId) => {
   try {
-    const [orders] = await pool.query(
-      'SELECT * FROM orders WHERE user_id = ? ORDER BY created_at DESC',
-      [userId]
-    );
+    const [orders] = await pool.query('CALL normalGetOrderHistoryByUserId(?)', [userId]);
 
-    const ordersWithItems = await Promise.all(orders.map(async (order) => {
-      const [items] = await pool.query(
-        'SELECT * FROM order_items WHERE order_id = ?',
-        [order.id]
-      );
+    const ordersWithItems = await Promise.all(orders[0].map(async (order) => {
+      const [items] = await pool.query('SELECT * FROM order_items WHERE order_id = ?', [order.id]);
       return { ...order, items };
     }));
 

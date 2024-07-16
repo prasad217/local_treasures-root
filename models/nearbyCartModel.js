@@ -1,31 +1,30 @@
 const pool = require('../config');
 
 const getCartItemsByUserId = async (userId) => {
-  const [cartItems] = await pool.query('SELECT * FROM nearby_cart_items WHERE user_id = ?', [userId]);
-  return cartItems;
+  const query = 'CALL getCartItemsByUserId(?)';
+  const [cartItems] = await pool.query(query, [userId]);
+  return cartItems[0]; // Stored procedure results are wrapped in an extra array
 };
 
 const addToCart = async (userId, productId, name, price, imageUrl, quantity, dealerId) => {
-  await pool.execute(
-    "INSERT INTO nearby_cart_items (user_id, product_id, name, price, image_url, quantity, dealer_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
-    [userId, productId, name, price, imageUrl, quantity, dealerId]
-  );
+  const query = 'CALL addToCart(?, ?, ?, ?, ?, ?, ?)';
+  await pool.execute(query, [userId, productId, name, price, imageUrl, quantity, dealerId]);
 };
 
 const clearCart = async (userId) => {
-  await pool.execute("DELETE FROM nearby_cart_items WHERE user_id = ?", [userId]);
+  const query = 'CALL clearCart(?)';
+  await pool.execute(query, [userId]);
 };
 
 const updateCartItemQuantity = async (cartItemId, quantity) => {
-  const [result] = await pool.execute(
-    "UPDATE nearby_cart_items SET quantity = ? WHERE id = ?",
-    [quantity, cartItemId]
-  );
+  const query = 'CALL updateCartItemQuantity(?, ?)';
+  const [result] = await pool.execute(query, [quantity, cartItemId]);
   return result;
 };
 
 const deleteCartItem = async (cartItemId) => {
-  const [result] = await pool.execute("DELETE FROM nearby_cart_items WHERE id = ?", [cartItemId]);
+  const query = 'CALL deleteCartItem(?)';
+  const [result] = await pool.execute(query, [cartItemId]);
   return result;
 };
 
@@ -36,4 +35,3 @@ module.exports = {
   updateCartItemQuantity,
   deleteCartItem
 };
-

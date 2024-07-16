@@ -100,6 +100,19 @@ app.post('/delivery-agent/register', agentController.registerAgent);
 app.post('/delivery-agent/verify-otp', agentController.verifyOTP);
 
 app.get('/api/dealers/nearby',dealerController.getNearbyDealers);
+app.get('/api/dealers/:dealerId/products', dealerController.getProductsByDealerId);
+app.post('/api/nearby/cart',nearbyCartController.addToNearbyCart);
+app.post('/api/nearby/cart/replace',nearbyCartController.replaceNearbyCart);
+app.get('/api/nearby/cart',nearbyCartController.getNearbyCartItems);
+app.patch('/api/nearby/cart/items/:id',nearbyCartController.updateNearbyCartItemQuantity);
+app.delete('/api/nearby/cart/:id',nearbyCartController.deleteNearbyCartItem);
+app.get('/api/user/longitude',userController.getUserAddresses);
+app.post('/api/nearby/address',nearbyAddressController.addNearbyAddress);
+app.get('/api/users/nearby-addresses',nearbyAddressController.getUserNearbyAddresses);
+app.post('/api/nearby/orders',nearbyOrderController.createNearbyOrder);
+
+
+
 
 // Error Handling Middleware
 app.use((err, req, res, next) => {

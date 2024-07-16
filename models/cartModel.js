@@ -1,26 +1,25 @@
-// models/cartModel.js
-
 const { pool } = require('../config/dbConfig');
 
 const addCartItem = async (userId, productId, name, discount_price, image_url) => {
-  await pool.execute(
-    "INSERT INTO cart_items (user_id, product_id, name, price, image_url) VALUES (?, ?, ?, ?, ?)",
-    [userId, productId, name, discount_price, image_url]
-  );
+  const query = 'CALL addCartItem(?, ?, ?, ?, ?)';
+  await pool.execute(query, [userId, productId, name, discount_price, image_url]);
 };
 
 const getCartItemsByUserId = async (userId) => {
-  const [rows] = await pool.query("SELECT * FROM cart_items WHERE user_id = ?", [userId]);
-  return rows;
+  const query = 'CALL getCartItemsByUserId(?)';
+  const [rows] = await pool.query(query, [userId]);
+  return rows[0]; // Stored procedure results are wrapped in an extra array
 };
 
 const deleteCartItemById = async (productId) => {
-  const [result] = await pool.execute("DELETE FROM cart_items WHERE id = ?", [productId]);
+  const query = 'CALL deleteCartItemById(?)';
+  const [result] = await pool.execute(query, [productId]);
   return result;
 };
 
 const updateCartItemQuantityById = async (productId, quantity) => {
-  const [result] = await pool.execute("UPDATE cart_items SET quantity = ? WHERE id = ?", [quantity, productId]);
+  const query = 'CALL updateCartItemQuantityById(?, ?)';
+  const [result] = await pool.execute(query, [productId, quantity]);
   return result;
 };
 

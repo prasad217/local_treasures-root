@@ -1,5 +1,3 @@
-// models/productModel.js
-
 const { pool } = require('../config/dbConfig');
 
 const addProduct = async (product) => {
@@ -8,7 +6,7 @@ const addProduct = async (product) => {
   } = product;
 
   await pool.execute(
-    'INSERT INTO products (dealer_id, name, image_url, description, actual_cost, discount_price, instockqty, category) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+    'CALL addProduct(?, ?, ?, ?, ?, ?, ?, ?)',
     [dealerId, name, imageUrl, description, actualCost, discountPrice, instockqty, category]
   );
 };
@@ -19,25 +17,24 @@ const getProductsByDealerId = async (dealerId) => {
 };
 
 const deleteProductById = async (productId) => {
-  const [result] = await pool.execute('DELETE FROM products WHERE id = ?', [productId]);
+  const [result] = await pool.execute('CALL deleteProductById(?)', [productId]);
   return result.affectedRows;
 };
 
 const getAllProducts = async () => {
-  const [rows] = await pool.query('SELECT * FROM products');
+  const [rows] = await pool.query('CALL getAllProducts()');
   return rows;
 };
 
 const getProductById = async (productId) => {
-  const [product] = await pool.query('SELECT * FROM products WHERE id = ?', [productId]);
+  const [product] = await pool.query('CALL getProductById(?)', [productId]);
   return product[0];
 };
 
 const getProductsByCategory = async (categoryName) => {
-  const [products] = await pool.query('SELECT * FROM products WHERE category = ?', [categoryName]);
+  const [products] = await pool.query('CALL getProductsByCategory(?)', [categoryName]);
   return products;
 };
-
 
 module.exports = {
   addProduct,
