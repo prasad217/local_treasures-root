@@ -9,10 +9,12 @@ const cookieParser = require('cookie-parser');
 const nodemailer = require('nodemailer');
 const crypto = require('crypto');
 const path = require('path');
+const Redis = require('ioredis'); // Import ioredis
+const RedisStore = require("connect-redis").default
 
 const saltRounds = 10; // Recommended value
 const app = express();
-const port = 3001;
+const port = process.env.PORT || 3001; // Use environment variable for port
 
 app.use(cors({
   origin: 'http://localhost:3000',
@@ -35,23 +37,38 @@ app.use('/uploads', express.static('/Users/prasad/Desktop/main project/local_tre
 const upload = multer({ storage: storage });
 
 const dbOptions = {
-  host: process.env.DB_HOST,
-  user: process.env.DB_USER,
-  password: process.env.DB_PASSWORD,
-  database: process.env.DB_NAME,
-  port: process.env.DB_PORT
+  host: process.env.DB_HOST || 'localhost',
+  user: process.env.DB_USER || 'root',
+  password: process.env.DB_PASSWORD || '',
+  database: process.env.DB_NAME || 'happy'
 };
 
 const pool = mysql.createPool(dbOptions);
 
-// Create session middleware with default session store
+// Create Redis client configuration
+const redisClient = new Redis({
+  host: process.env.REDIS_HOST || 'localhost',
+  port: process.env.REDIS_PORT || 6379,
+  password: process.env.REDIS_PASSWORD || '',
+});
+
+redisClient.on('error', (err) => {
+  console.error('Redis error:', err);
+});
+
+redisClient.on('connect', () => {
+  console.log('Connected to Redis');
+});
+
+
 app.use(session({
-  secret: 'keyboard cat',
+  store: new RedisStore({ client: redisClient }),
+  secret: process.env.SESSION_SECRET || 'keyboard cat',
   resave: false,
   saveUninitialized: false,
   cookie: {
     httpOnly: true,
-    secure: false, // Consider environment to set appropriately
+    secure: false, // Consider setting to true in production with HTTPS
     sameSite: 'lax',
     expires: null
   }
@@ -1272,7 +1289,6 @@ app.get('/api/user/suggestions', async (req, res) => {
   }
 });
 
-// Server running on port 3001
 app.listen(3001, () => {
   console.log('Server running on port 3001');
 });
