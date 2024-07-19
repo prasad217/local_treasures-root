@@ -277,20 +277,6 @@ app.post('/api/address', async (req, res) => {
 
 // Assuming this is a part of your Express app setup
 
-app.get('/api/users/addresses', async (req, res) => {
-  const userId = req.session.userId;
-  if (!userId) {
-      return res.status(401).json({ message: 'Unauthorized. Please log in.' });
-  }
-
-  try {
-      const [addresses] = await pool.query('SELECT * FROM user_addresses WHERE user_id = ?', [userId]);
-      res.json(addresses);
-  } catch (error) {
-      console.error('Error fetching addresses:', error);
-      res.status(500).json({ error: 'Server error' });
-  }
-});
 
 
 
