@@ -15,7 +15,7 @@ const app = express();
 const port = 3001;
 
 app.use(cors({
-  origin: 'https://prasad217.github.io',
+  origin: 'http://localhost:3000',
   credentials: true,
 }));
 
@@ -24,34 +24,35 @@ app.use(express.json());
 
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
-    cb(null, '/Users/prasad/Desktop/main project/local_treasures-root/server/uploads');
+    cb(null, process.env.UPLOADS_PATH || '/uploads'); // Use env variable for path
   },
   filename: function (req, file, cb) {
     cb(null, Date.now() + '-' + file.originalname);
   }
 });
-app.use('/uploads', express.static('/Users/prasad/Desktop/main project/local_treasures-root/server/uploads'));
+app.use('/uploads', express.static(process.env.UPLOADS_PATH || '/uploads'));
 
 const upload = multer({ storage: storage });
 
+// Updated DB Configurations from .env file
 const dbOptions = {
   host: process.env.DB_HOST,
   user: process.env.DB_USER,
   password: process.env.DB_PASSWORD,
   database: process.env.DB_NAME,
-  port: process.env.DB_PORT
+  port: process.env.DB_PORT || 3306,
 };
 
 const pool = mysql.createPool(dbOptions);
 
 // Create session middleware with default session store
 app.use(session({
-  secret: 'keyboard cat',
+  secret: process.env.SESSION_SECRET || 'keyboard cat',
   resave: false,
   saveUninitialized: false,
   cookie: {
     httpOnly: true,
-    secure: false, // Consider environment to set appropriately
+    secure: process.env.COOKIE_SECURE === 'true', // Use env variable to toggle secure cookies
     sameSite: 'lax',
     expires: null
   }
@@ -64,9 +65,7 @@ const transporter = nodemailer.createTransport({
     pass: process.env.EMAIL_PASS
   }
 });
-
 app.set('trust proxy', 1);
-
 //user backend
 app.post('/signin', async (req, res) => {
   const { email, password } = req.body;

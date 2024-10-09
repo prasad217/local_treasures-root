@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: ecommerce-backend-service
+  labels:
+    app: ecommerce-backend
+spec:
+  selector:
+    app: ecommerce-backend
+  type: NodePort
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 3001
+      nodePort: 31340  # You can define a static NodePort (between 30000-32767) or let Kubernetes assign it
